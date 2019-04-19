@@ -1,4 +1,3 @@
-
 #include "muduo/base/Atomic.h"
 #include "muduo/base/Logging.h"
 #include "muduo/base/Thread.h"
@@ -8,8 +7,8 @@
 #include "muduo/net/TcpServer.h"
 
 #include "codec.h"
-#include<stdlib.h>
-#include<mysql/mysql.h>
+#include <stdlib.h>
+#include <mysql/mysql.h>
 #include <utility>
 #include <map>
 #include <vector>
@@ -17,77 +16,7 @@
 #include <unistd.h>
 #include <iostream>
 
-
-using namespace muduo;
-using namespace muduo::net;
-using namespace std;
-
-class dbCache
-{
-    public:
-    dbCache(ThreadPool *threadPool):
-        threadPoolptr_(threadPool)
-    {
-    }
-    int getCache(const TcpConnectionPtr& conn, string hallid, string time, int row, int col)
-    {
-        int hallrow;
-        int hallcol;
-        getHallInfo(hallid, hallrow, hallcol);
-        pair<string, string> p(hallid, time);
-        //mutexGuard
-      {
-        MutexLockGuard lock(mutex_);
-        auto iter = cache.begin();
-        iter = cache.find(p);
-        if (iter == cache.end())
-        {
-            //mutex
-            cache[p].push_back(0);
-            //endmutex
-            cout << "读缓存" << endl;
-            //TODO 读取缓存,查询状态,回调?或者使用runAfter()
-             threadPoolptr_->run(bind(&dbCache::loadCacheAndSend, this, conn, hallrow, hallcol, row, col));
-            //runAfter(1, bind(&dbCache::getCache, this, hallid, time, row, col));
-            return 0;
-        }
-        else
-        {
-            //数组第一个作为状态标记
-            if (cache[p][0] == 0)
-            {
-                cout << "正在读取缓存" << endl;
-                conn->getLoop()->runAfter(1, bind(&dbCache::getCache, this, hallid, time, row, col));
-                return 1;
-            }
-            else
-            {   
-                if (cache[p][hallcol * (row - 1) + col] == '1')
-                {
-                    cout << "票已售" << endl;
-                    string responce = "fail";
-                    conn->send(responce);
-                    return 2;
-                }
-                else
-                {
-                    cache[p][hallcol * (row - 1) + col] = '1';
-                    cout << "购票成功" << endl;
-                    //for (auto &ch: cache[p])
-                    //{
-                    //    cout << ch << " ";
-                    //}
-                    string responce = "succ";
-                    conn->send(responce);
-                    return 3;
-                }
-            }
-        }
-      }
-    }
-    private:
-    
-    int loadCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, string time, int hallrow, int hallcol, int row, int col)
+void loadCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, muduo::string hallid, muduo::string time, int hallrow, int hallcol, int row, int col, std::map<std::pair<muduo::string, muduo::string>, std::vector<char> > *cache, muduo::MutexLock  *mutex_)
     {
         int res;//执行sql语句后的返回标志
         MYSQL_RES *res_ptr;//指向查询结果的指针
@@ -99,78 +28,78 @@ class dbCache
 
         if(conn == NULL) 
         { //如果返回NULL说明初始化失败
-            cout << "mysql_init failed!" << endl;
-            return -1;
+            std::cout << "mysql_init failed!" << std::endl;
+            return;
         }
         conn = mysql_real_connect(conn,"127.0.0.1","root","13640358","Movie", 0 ,NULL,0);
         if (conn)
         {
-            cout << "Connection success!" << endl;
+            std::cout << "Connection success!" << std::endl;
         }
         else 
         {
-            cout << "Connection failed!" << endl;
-            cout << mysql_error(conn) << endl;
-            return -1;
+            std::cout << "Connection failed!" << std::endl;
+            std::cout << mysql_error(conn) << std::endl;
+            return;
         }
         mysql_query(conn,"set names UTF8");
         //FIXME
-        string sql = "select Issale from Table_Seat where S_ID=(select S_ID from Table_Schedule where H_ID=" + hallid + " AND S_TIME=\'" + time + "\')";
+        muduo::string sql = "select Issale from Table_Seat where S_ID=(select S_ID from Table_Schedule where H_ID=" + hallid + " AND S_TIME=\'" + time + "\')";
         res = mysql_query(conn, sql.c_str());
 
         if(res)
         {
-            cout << mysql_error(conn) << endl;
+            std::cout << mysql_error(conn) << std::endl;
             mysql_close(conn);
-            return -1;
+            return;
         }
         else
         {
-            pair<string, string> p(hallid, time);
+            std::pair<muduo::string, muduo::string> p(hallid, time);
             res_ptr = mysql_store_result(conn);
             if (res_ptr)
             {
                 resrow = mysql_num_rows(res_ptr);
               {
-                MutexLockGuard lock(mutex_);
+                muduo::MutexLockGuard lock(*mutex_);
                 for (int i = 0; i < resrow; i++)
                 {
                     result_row = mysql_fetch_row(res_ptr);
                     //cout << result_row[0] << " ";
-                    cache[p].push_back(*result_row[0]);
+                    (*cache)[p].push_back(*result_row[0]);
                 }
-                cache[p][0] = 'k';
+                (*cache)[p][0] = 'k';
               }
             }
             else
             {
-                cout << "Failed to Get Seat Detail" << endl;
+                std::cout << "Failed to Get Seat Detail" << std::endl;
                 mysql_close(conn);
                 mysql_free_result(res_ptr);
-                return -1;
+                return;
             }
-            cout << "缓存读取完毕" << endl;
+            std::cout << "缓存读取完毕" << std::endl;
             //for (auto &ch: cache[p])
             //{
             //    cout << ch << " ";
             //}
           {
-            MutexLockGuard lock(mutex_);
-            if (cache[p][hallcol * (row - 1) + col] == '1')
+            muduo::MutexLockGuard lock(*mutex_);
+            if ((*cache)[p][hallcol * (row - 1) + col] == '1')
             {
-                cout << "票已售" << endl;
-                string responce = "fail";
+                std::cout << "票已售" << std::endl;
+                muduo::string responce = "fail";
                 tcpconn->send(responce);
             }
             else
             {
-                cache[p][hallcol * (row - 1) + col] = '1';
-                cout << "购票成功" << endl;
+                (*cache)[p][hallcol * (row - 1) + col] = '1';
+                std::cout << "购票成功" << std::endl;
                 //for (auto &ch: cache[p])
                 //{
                 //    cout << ch << " ";
                 //}
-                string responce = "succ";
+                muduo::string responce = "succ";
                 tcpconn->send(responce);
              }
           } 
@@ -179,7 +108,103 @@ class dbCache
         mysql_free_result(res_ptr);
     }
     
-    int getHallInfo(string &hallid, int &hallrow, int &hallcol)
+    void getCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, muduo::string hallid, muduo::string time, int hallrow, int hallcol, int row, int col, std::map<std::pair<muduo::string, muduo::string>, std::vector<char> > *cache, muduo::MutexLock  *mutex_)
+    {
+          std::pair<muduo::string, muduo::string> p(hallid, time);
+          {
+            muduo::MutexLockGuard lock(*mutex_);
+             if ((*cache)[p][0] == 0)
+             {
+                tcpconn->getLoop()->runAfter(1, bind(&getCacheAndSend, tcpconn, hallid, time, hallrow, hallcol, row, col, cache, mutex_));
+                return;
+             }
+             else if ((*cache)[p][0] == 'k')
+             {
+                if ((*cache)[p][hallcol * (row - 1) + col] == '1')
+                {
+                    std::cout << "票已售get()" << std::endl;
+                    muduo::string responce = "fail";
+                    tcpconn->send(responce);
+                }
+                else
+                {
+                    (*cache)[p][hallcol * (row - 1) + col] = '1';
+                    std::cout << "购票成功get()" << std::endl;
+                    muduo::string responce = "succ";
+                    tcpconn->send(responce);
+                 }
+            } 
+        }
+    }
+    
+    
+class dbCache
+{
+    public:
+    dbCache(muduo::ThreadPool *threadPool):
+        threadPoolptr_(threadPool)
+    {
+    }
+    int getCache(const muduo::net::TcpConnectionPtr& conn, muduo::string hallid, muduo::string time, int row, int col)
+    {
+        int hallrow;
+        int hallcol;
+        getHallInfo(hallid, hallrow, hallcol);
+        std::pair<muduo::string, muduo::string> p(hallid, time);
+        //mutexGuard
+      {
+        muduo::MutexLockGuard lock(mutex_);
+        auto iter = cache.begin();
+        iter = cache.find(p);
+        if (iter == cache.end())
+        {
+            //mutex
+            cache[p].push_back(0);
+            //endmutex
+            std::cout << "读缓存" << std::endl;
+            //TODO 读取缓存,查询状态,回调?或者使用runAfter()
+            sleep(5);
+            threadPoolptr_->run(bind(&loadCacheAndSend, conn, hallid, time, hallrow, hallcol, row, col, &cache, &mutex_));
+            
+            return 0;
+        }
+        else
+        {
+            //数组第一个作为状态标记
+            if (cache[p][0] == 0)
+            {
+                std::cout << "正在读取缓存" << std::endl;
+                conn->getLoop()->runAfter(5, bind(&getCacheAndSend, conn, hallid, time, hallrow, hallcol, row, col, &cache, &mutex_));
+                return 1;
+            }
+            else
+            {   
+                if (cache[p][hallcol * (row - 1) + col] == '1')
+                {
+                    std::cout << "票已售" << std::endl;
+                    muduo::string responce = "fail";
+                    conn->send(responce);
+                    return 2;
+                }
+                else
+                {
+                    cache[p][hallcol * (row - 1) + col] = '1';
+                    std::cout << "购票成功" << std::endl;
+                    //for (auto &ch: cache[p])
+                    //{
+                    //    cout << ch << " ";
+                    //}
+                    muduo::string responce = "succ";
+                    conn->send(responce);
+                    return 3;
+                }
+            }
+        }
+      }
+    }
+    private:
+    
+    int getHallInfo(muduo::string &hallid, int &hallrow, int &hallcol)
     {
         int res;//执行sql语句后的返回标志
         MYSQL_RES *res_ptr;//指向查询结果的指针
@@ -191,28 +216,28 @@ class dbCache
 
         if(conn == NULL) 
         { //如果返回NULL说明初始化失败
-            cout << "mysql_init failed!" << endl;
+            std::cout << "mysql_init failed!" << std::endl;
             return -1;
         }
         conn = mysql_real_connect(conn,"127.0.0.1","root","13640358","Movie", 0 ,NULL,0);
         if (conn)
         {
-            cout << "Connection success!" << endl;
+            std::cout << "Connection success!" << std::endl;
         }
         else 
         {
-            cout << "Connection failed!" << endl;
-            cout << mysql_error(conn) << endl;
+            std::cout << "Connection failed!" << std::endl;
+            std::cout << mysql_error(conn) << std::endl;
             return -1;
         }
         mysql_query(conn,"set names UTF8");
         //FIXME
-        string sql = "select SEAT_ROW, SEAT_COL from Table_Hall where H_ID=" + hallid;
+        muduo::string sql = "select SEAT_ROW, SEAT_COL from Table_Hall where H_ID=" + hallid;
         res = mysql_query(conn, sql.c_str());
 
         if(res) 
         {
-            cout << mysql_error(conn) << endl;
+            std::cout << mysql_error(conn) << std::endl;
             mysql_close(conn);
             return -1;
         }
@@ -227,7 +252,7 @@ class dbCache
             }
             else
             {
-                cout << "Failed to Get Hall Info" << endl;
+                std::cout << "Failed to Get Hall Info" << std::endl;
                 mysql_close(conn);
                 mysql_free_result(res_ptr);
                 return -1;
@@ -237,7 +262,7 @@ class dbCache
         }
     }
     
-    map<pair<string, string>, vector<char> > cache GUARDED_BY(mutex_);
-    MutexLock mutex_;
-    ThreadPool *threadPoolptr_;
+    std::map<std::pair<muduo::string, muduo::string>, std::vector<char> > cache /*GUARDED_BY(mutex_)*/;
+    muduo::MutexLock mutex_;
+    muduo::ThreadPool *threadPoolptr_;
 };
