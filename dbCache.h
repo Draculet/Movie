@@ -26,8 +26,10 @@ void loadCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, muduo::string halli
         int resrow,rescolumn,length;//查询返回的行数和列数
         MYSQL *conn;//一个数据库链接指针
         
-        
+      {
+        muduo::MutexLockGuard lock(*mutex_);
         printf("In threadPool pid = %d\n", muduo::CurrentThread::tid());
+        printf("In threadPool mysql_init() pid = %d\n", muduo::CurrentThread::tid());
         conn = mysql_init(NULL);
         
         if(conn == NULL) 
@@ -35,7 +37,10 @@ void loadCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, muduo::string halli
             std::cout << "mysql_init failed!" << std::endl;
             return;
         }
-        conn = mysql_real_connect(conn,"127.0.0.1","root","13640358","Movie", 0 ,NULL,0);
+        
+        printf("In threadPool mysql_real_connect() pid = %d\n", muduo::CurrentThread::tid());
+        
+        conn = mysql_real_connect(conn,"127.0.0.1","root","335369376","Movie", 0 ,NULL,0);
         if (conn)
         {
             std::cout << "Connection success!" << std::endl;
@@ -50,7 +55,7 @@ void loadCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, muduo::string halli
         //FIXME
         muduo::string sql = "select Issale from Table_Seat where S_ID=(select S_ID from Table_Schedule where H_ID=" + hallid + " AND S_TIME=\'" + time + "\')";
         res = mysql_query(conn, sql.c_str());
-
+      }
         if(res)
         {
             std::cout << mysql_error(conn) << std::endl;
@@ -137,7 +142,7 @@ void loadCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, muduo::string halli
                     muduo::string responce = "succ";
                     tcpconn->send(responce);
                  }
-            } 
+            }
         }
     }
     
@@ -153,7 +158,10 @@ class dbCache
     {
         int hallrow;
         int hallcol;
+      //{
+      // muduo::MutexLockGuard lock(mutex_);
         getHallInfo(hallid, hallrow, hallcol);
+      //}
         std::pair<muduo::string, muduo::string> p(hallid, time);
         printf("In EventLoop pid = %d\n", muduo::CurrentThread::tid());
         //mutexGuard
@@ -178,7 +186,7 @@ class dbCache
             if (cache[p][0] == 0)
             {
                 std::cout << "正在读取缓存" << std::endl;
-                conn->getLoop()->runAfter(5, bind(&getCacheAndSend, conn, hallid, time, hallrow, hallcol, row, col, &cache, &mutex_));
+                conn->getLoop()->runAfter(1, bind(&getCacheAndSend, conn, hallid, time, hallrow, hallcol, row, col, &cache, &mutex_));
                 return 1;
             }
             else
@@ -216,14 +224,19 @@ class dbCache
         MYSQL_ROW result_row;//按行返回查询信息
         int row,column,length;//查询返回的行数和列数
         MYSQL *conn;//一个数据库链接指针
+        
+      {
+        muduo::MutexLockGuard lock(mutex_);
+        printf("In gethallinfo mysql_init() pid = %d\n", muduo::CurrentThread::tid());
         conn = mysql_init(NULL);
 
-        if(conn == NULL) 
+        if(conn == NULL)
         { //如果返回NULL说明初始化失败
             std::cout << "mysql_init failed!" << std::endl;
             return -1;
         }
-        conn = mysql_real_connect(conn,"127.0.0.1","root","13640358","Movie", 0 ,NULL,0);
+        printf("In getHallInfo mysql_real_connect() pid = %d\n", muduo::CurrentThread::tid());
+        conn = mysql_real_connect(conn,"127.0.0.1","root","335369376","Movie", 0 ,NULL,0);
         if (conn)
         {
             std::cout << "Connection success!" << std::endl;
@@ -234,6 +247,8 @@ class dbCache
             std::cout << mysql_error(conn) << std::endl;
             return -1;
         }
+      }
+        
         mysql_query(conn,"set names UTF8");
         //FIXME
         muduo::string sql = "select SEAT_ROW, SEAT_COL from Table_Hall where H_ID=" + hallid;

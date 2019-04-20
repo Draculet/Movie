@@ -1,4 +1,3 @@
-
 #include "muduo/base/Atomic.h"
 #include "muduo/base/Logging.h"
 #include "muduo/base/Thread.h"
@@ -49,7 +48,7 @@ class dbServer
     private:
     void onConnection(const TcpConnectionPtr& conn)
     {
-        printf("In EventLoop pid = %d\n", muduo::CurrentThread::tid());
+        printf("OnConnection In EventLoop pid = %d\n", muduo::CurrentThread::tid());
         LOG_TRACE << conn->peerAddress().toIpPort() << " -> "
             << conn->localAddress().toIpPort() << " is "
             << (conn->connected() ? "UP" : "DOWN");
