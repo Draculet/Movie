@@ -5,6 +5,7 @@
 #include "muduo/net/EventLoop.h"
 #include "muduo/net/InetAddress.h"
 #include "muduo/net/TcpServer.h"
+#include "muduo/base/CurrentThread.h"
 
 #include "codec.h"
 #include <stdlib.h>
@@ -24,8 +25,11 @@ void loadCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, muduo::string halli
         MYSQL_ROW result_row;//按行返回查询信息
         int resrow,rescolumn,length;//查询返回的行数和列数
         MYSQL *conn;//一个数据库链接指针
+        
+        
+        printf("In threadPool pid = %d\n", muduo::CurrentThread::tid());
         conn = mysql_init(NULL);
-
+        
         if(conn == NULL) 
         { //如果返回NULL说明初始化失败
             std::cout << "mysql_init failed!" << std::endl;
@@ -151,6 +155,7 @@ class dbCache
         int hallcol;
         getHallInfo(hallid, hallrow, hallcol);
         std::pair<muduo::string, muduo::string> p(hallid, time);
+        printf("In EventLoop pid = %d\n", muduo::CurrentThread::tid());
         //mutexGuard
       {
         muduo::MutexLockGuard lock(mutex_);
@@ -163,7 +168,6 @@ class dbCache
             //endmutex
             std::cout << "读缓存" << std::endl;
             //TODO 读取缓存,查询状态,回调?或者使用runAfter()
-            sleep(5);
             threadPoolptr_->run(bind(&loadCacheAndSend, conn, hallid, time, hallrow, hallcol, row, col, &cache, &mutex_));
             
             return 0;

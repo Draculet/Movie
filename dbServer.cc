@@ -41,6 +41,7 @@ class dbServer
     void start()
     {
         LOG_INFO << "starting " << numThreads_ << " threads.";
+        server_.setThreadNum(numThreads_);
         threadPool_.start(numThreads_);
         server_.start();
     }
@@ -48,6 +49,7 @@ class dbServer
     private:
     void onConnection(const TcpConnectionPtr& conn)
     {
+        printf("In EventLoop pid = %d\n", muduo::CurrentThread::tid());
         LOG_TRACE << conn->peerAddress().toIpPort() << " -> "
             << conn->localAddress().toIpPort() << " is "
             << (conn->connected() ? "UP" : "DOWN");
@@ -102,7 +104,7 @@ class dbServer
 int main(int argc, char* argv[])
 {
   LOG_INFO << "pid = " << getpid() << ", tid = " << CurrentThread::tid();
-  int numThreads = 0;
+  int numThreads = 4;
   if (argc > 1)
   {
     numThreads = atoi(argv[1]);
