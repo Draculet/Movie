@@ -47,7 +47,7 @@ class dbCache
             //endmutex
             cout << "读缓存" << endl;
             //TODO 读取缓存,查询状态,回调?或者使用runAfter()
-             threadPoolptr_->run(bind(&dbCache::loadCacheAndSend, this, conn, hallrow, hallcol, row, col));
+             threadPoolptr_->run(bind(&dbCache::loadCacheAndSend, this, conn, hallid, time, hallrow, hallcol, row, col));
             //runAfter(1, bind(&dbCache::getCache, this, hallid, time, row, col));
             return 0;
         }
@@ -57,7 +57,7 @@ class dbCache
             if (cache[p][0] == 0)
             {
                 cout << "正在读取缓存" << endl;
-                conn->getLoop()->runAfter(1, bind(&dbCache::getCache, this, hallid, time, row, col));
+                conn->getLoop()->runAfter(1, bind(&dbCache::getCache, this, conn, hallid, time, row, col));
                 return 1;
             }
             else
@@ -102,7 +102,7 @@ class dbCache
             cout << "mysql_init failed!" << endl;
             return -1;
         }
-        conn = mysql_real_connect(conn,"127.0.0.1","root","13640358","Movie", 0 ,NULL,0);
+        conn = mysql_real_connect(conn,"127.0.0.1","root","335369376","Movie", 0 ,NULL,0);
         if (conn)
         {
             cout << "Connection success!" << endl;
