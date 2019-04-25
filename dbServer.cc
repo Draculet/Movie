@@ -1,4 +1,3 @@
-
 #include "muduo/base/Atomic.h"
 #include "muduo/base/Logging.h"
 #include "muduo/base/Thread.h"
@@ -7,10 +6,9 @@
 #include "muduo/net/InetAddress.h"
 #include "muduo/net/TcpServer.h"
 
-#include "codec.h"
 #include "dbCache.h"
-#include<stdlib.h>
-#include<mysql/mysql.h>
+#include <stdlib.h>
+#include <mysql/mysql.h>
 #include <utility>
 #include <map>
 #include <vector>
@@ -78,7 +76,7 @@ class dbServer
                        Timestamp)
     {
         vector<string> v = split(',', message);
-        int res = cache_.getCache(conn, v[0], v[1], atoi(v[2].c_str()), atoi(v[3].c_str()));
+        int res = cache_.getSeatCache(conn, v[0], v[1], atoi(v[2].c_str()), atoi(v[3].c_str()));
         if (res == 1)
             printf("getCache() return 1\n");
         else if (res == 2)
