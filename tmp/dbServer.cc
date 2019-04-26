@@ -6,16 +6,16 @@
 #include "muduo/net/InetAddress.h"
 #include "muduo/net/TcpServer.h"
 
-#include "codec.h"
 #include "dbCache.h"
-#include<stdlib.h>
-#include<mysql/mysql.h>
+#include <stdlib.h>
+#include <mysql/mysql.h>
 #include <utility>
 #include <map>
 #include <vector>
 #include <stdio.h>
 #include <unistd.h>
 #include <iostream>
+#include "codec.h"
 
 using namespace muduo;
 using namespace muduo::net;
@@ -40,7 +40,6 @@ class dbServer
     void start()
     {
         LOG_INFO << "starting " << numThreads_ << " threads.";
-        server_.setThreadNum(numThreads_);
         threadPool_.start(numThreads_);
         server_.start();
     }
@@ -48,7 +47,6 @@ class dbServer
     private:
     void onConnection(const TcpConnectionPtr& conn)
     {
-        printf("OnConnection In EventLoop pid = %d\n", muduo::CurrentThread::tid());
         LOG_TRACE << conn->peerAddress().toIpPort() << " -> "
             << conn->localAddress().toIpPort() << " is "
             << (conn->connected() ? "UP" : "DOWN");
@@ -103,7 +101,7 @@ class dbServer
 int main(int argc, char* argv[])
 {
   LOG_INFO << "pid = " << getpid() << ", tid = " << CurrentThread::tid();
-  int numThreads = 4;
+  int numThreads = 0;
   if (argc > 1)
   {
     numThreads = atoi(argv[1]);
