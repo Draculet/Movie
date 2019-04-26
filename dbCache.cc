@@ -30,13 +30,13 @@ dbCache::dbCache(ThreadPool *threadPool):
 //TODO 需要考虑下映后不存在座位的情况
 int dbCache::getSeatCache(const TcpConnectionPtr& conn, string hallid, string time, int row, int col)
 {
-	int hallrow;
-    int hallcol;
+	int hallrow = 0;
+    int hallcol = 0;
     getHallInfo(hallid, hallrow, hallcol);
     pair<string, string> p(hallid, time);
         //mutexGuard
     {
-        MutexLockGuard lock(mutex_);
+        MutexLockGuard lock(mutex_[0]);
         auto iter = seatCache_.begin();
         iter = seatCache_.find(p);
         if (iter == seatCache_.end())
@@ -92,7 +92,7 @@ int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, stri
     MYSQL *conn;//一个数据库链接指针
     
     {
-        MutexLockGuard lock(mutex_);
+        MutexLockGuard lock(sqlmutex_);
         
     	conn = mysql_init(NULL);
     	if(conn == NULL) 
@@ -133,7 +133,7 @@ int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, stri
             {
                 resrow = mysql_num_rows(res_ptr);
               	{
-                	MutexLockGuard lock(mutex_);
+                	MutexLockGuard lock(mutex_[0]);
                 	
                 	for (int i = 0; i < resrow; i++)
                 	{
@@ -158,20 +158,20 @@ int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, stri
             //    cout << ch << " ";
             //}
     	{
-        	MutexLockGuard lock(mutex_);
+        	MutexLockGuard lock(mutex_[0]);
         	
         	if (seatCache_[p][0] == 'k')
             {
             	if (seatCache_[p][hallcol * (row - 1) + col] == '1')
             	{
-                	cout << "票已售loadCacheAndSend()" << endl;
+                	cout << "票已售loadSeatCacheAndSend()" << endl;
                 	string responce = "fail";
                 	tcpconn->send(responce);
             	}
             	else
            		{
                 	seatCache_[p][hallcol * (row - 1) + col] = '1';
-                	cout << "购票成功loadCacheAndSend()" << endl;
+                	cout << "购票成功loadSeatCacheAndSend()" << endl;
                 //for (auto &ch: cache[p])
                 //{
                 //    cout << ch << " ";
@@ -193,7 +193,7 @@ int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, stri
 int dbCache::getHallInfo(string& hallid, int& hallrow, int& hallcol)
 {
    	{
-    	MutexLockGuard lock(mutex_);
+    	MutexLockGuard lock(mutex_[1]);
     	auto iter = hallCache_.begin();
     	iter = hallCache_.find(hallid);
     	if (iter != hallCache_.end())
@@ -218,7 +218,7 @@ int dbCache::getHallInfo(string& hallid, int& hallrow, int& hallcol)
             }
             else
             {   
-            	if (hallCache_[hallrow].first > 0 && hallCache_[hallcol].second > 0)
+            	if (hallCache_[hallid].first > 0 && hallCache_[hallid].second > 0)
             	{
                 	hallrow = hallCache_[hallid].first;
                 	hallcol = hallCache_[hallid].second;
@@ -245,11 +245,8 @@ int loadHallCache(std::string& hallid, int& hallrow, int& hallcol)//FIXME MUTEX
         MYSQL *conn;//一个数据库链接指针
         
         {
-        	MutexLockGuard lock(mutex_);
+        	MutexLockGuard lock(sqlmutex_);
         	conn = mysql_init(NULL);
-        	int hallrow = 0;
-        	int hallcol = 0;
-
         	if(conn == NULL) 
         	{ //如果返回NULL说明初始化失败
             	cout << "mysql_init failed!" << endl;
@@ -284,12 +281,20 @@ int loadHallCache(std::string& hallid, int& hallrow, int& hallcol)//FIXME MUTEX
             	if (res_ptr)
             	{
             		{
-        				MutexLockGuard lock(mutex_);
+        				MutexLockGuard lock(mutex_[1]);
         			
                 		result_row = mysql_fetch_row(res_ptr);
                 		hallrow = atoi(result_row[0]);
                 		hallcol = atoi(result_row[1]);
-                		hallCache_[hallid] = pair<int, int>(hallrow, hallcol);
+                		if (hallrow > 0 && hallcol > 0)
+                			hallCache_[hallid] = pair<int, int>(hallrow, hallcol);
+                		else
+                		{
+                			hallrow = -1;
+                			hallcol = -1;
+                			cout << "读取数据错误getHallInfo()" << endl;
+                			return -1;
+                		}
                 	}
                 	cout << "缓存读取完成loadHallCache()" << endl;
             	}
@@ -303,27 +308,13 @@ int loadHallCache(std::string& hallid, int& hallrow, int& hallcol)//FIXME MUTEX
             }
             mysql_close(conn);
             mysql_free_result(res_ptr);
-            {
-            	MutexLockGuard lock(mutex_);
-            	if (hallCache_[hallrow].first > 0 && hallCache_[hallcol].second > 0)
-            	{
-                	hallrow = hallCache_[hallid].first;
-                	hallcol = hallCache_[hallid].second;
-                }
-                else
-                {
-                	cout << "读取数据错误getHallInfo()" << endl;
-                	return -1;
-                }
-            }
-        }
 }
 
 
 int dbCache::getScheCache(const muduo::net::TcpConnectionPtr& conn, std::string movie)
 {
 	{
-    	MutexLockGuard lock(mutex_);
+    	MutexLockGuard lock(mutex_[2]);
     	auto iter = scheCache_.begin();
     	iter = scheCache_.find(movie);
     	if (iter != scheCache_.end())
@@ -376,7 +367,7 @@ int loadScheCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::string& mov
     MYSQL *conn;//一个数据库链接指针
     
   {
-    MutexLockGuard lock(mutex_);
+    MutexLockGuard lock(sqlmutex_);
         
         
     conn = mysql_init(NULL);
@@ -415,7 +406,7 @@ int loadScheCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::string& mov
             {
                 resrow = mysql_num_rows(res_ptr);
               	{
-                	MutexLockGuard lock(mutex_);
+                	MutexLockGuard lock(mutex_[2]);
                 	
                 	for (int i = 0; i < resrow; i++)
                 	{
@@ -440,7 +431,7 @@ int loadScheCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::string& mov
             //    cout << ch << " ";
             //}
           {
-            MutexLockGuard lock(mutex_);
+            MutexLockGuard lock(mutex_[2]);
             if (scheCache_[movie][0] == 'k')
             {
             	//FIXME 此处可能需要使用codec_.send()
@@ -469,7 +460,7 @@ int getHallchoiceCache(const muduo::net::TcpConnectionPtr& tcpconn, std::string 
 {
 	pair<string, string> p(movie, time);
     {
-        MutexLockGuard lock(mutex_);
+        MutexLockGuard lock(mutex_[3]);
         auto iter = hallchoiceCache_.begin();
         iter = hallchoiceCache_.find(p);
         if (iter == hallchoiceCache_.end())
@@ -522,7 +513,7 @@ int loadHallChoiceAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::string& mo
     MYSQL *conn;//一个数据库链接指针
     
   {
-    MutexLockGuard lock(mutex_);
+    MutexLockGuard lock(sqlmutex_);
     
     
     conn = mysql_init(NULL);
@@ -562,7 +553,7 @@ int loadHallChoiceAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::string& mo
             {
                 resrow = mysql_num_rows(res_ptr);
               	{
-                	MutexLockGuard lock(mutex_);
+                	MutexLockGuard lock(mutex_[3]);
                 	for (int i = 0; i < resrow; i++)
                 	{
                     	result_row = mysql_fetch_row(res_ptr);
@@ -585,7 +576,7 @@ int loadHallChoiceAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::string& mo
             //    cout << ch << " ";
             //}
           {
-            MutexLockGuard lock(mutex_);
+            MutexLockGuard lock(mutex_[3]);
             if (hallchoiceCache_[p][0] == 'k')
             {
             	//FIXME 此处可能需要使用codec_.send()
