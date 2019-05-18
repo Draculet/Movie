@@ -31,7 +31,7 @@ class dbCache
     //warn
     int loadSeatCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::string hallid, std::string time, int hallrow, int hallcol, int row, int col);
     int getHallInfo(const muduo::net::TcpConnectionPtr& conn, std::string& hallid, int& hallrow, int& hallcol);
-    int loadHallCache(std::string& hallid, int& hallrow, int& hallcol);
+    int loadHallCacheWithLock(std::string& hallid, int& hallrow, int& hallcol);
     int loadScheCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::string& movie);
     int loadHallChoiceAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::string& movie, std::string& time);
     
@@ -40,6 +40,8 @@ class dbCache
     //1. 'd'删除,删除缓存前使用此标记,防止读取
     //2. 'm'修改,用于删除缓存写回数据库时防止读取
     //3. 'k'正常情况
+    //std::shared_ptr<vector<pair<string, string> > > moviePtr
+    //使用copy on write实现读不堵塞写,高效率并发读
     std::map<std::pair<std::string, std::string>, std::vector<char> > seatCache_;//mutex[0]
     //厅和时间->座位情况 使用char(0)标识正在访问数据库,char('k')表示已访问完成
     //正常数组数据是char('0', '1'),可新增'-1'表示不可用
@@ -51,6 +53,7 @@ class dbCache
 	//电影名和时间->厅 使用char(0)表示正在访问数据库,char('k')表示已访问完成
     muduo::MutexLock mutex_[4];//4把锁分别同步4个同步数据map
     muduo::MutexLock sqlmutex_;
+    muduo::MutexLock seatmutex_;
     //mysql_init()和mysql_real_connect()似乎不是线程安全的,需要加锁
     muduo::ThreadPool *threadPoolptr_;
 };

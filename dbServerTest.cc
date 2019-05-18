@@ -48,12 +48,10 @@ class dbServer
     private:
     void onConnection(const TcpConnectionPtr& conn)
     {
-        //printf("OnConnection In EventLoop pid = %d\n", muduo::CurrentThread::tid());
-        LOG_INFO << conn->peerAddress().toIpPort() << " -> "
+        printf("OnConnection In EventLoop pid = %d\n", muduo::CurrentThread::tid());
+        LOG_TRACE << conn->peerAddress().toIpPort() << " -> "
             << conn->localAddress().toIpPort() << " is "
             << (conn->connected() ? "UP" : "DOWN");
-        //connCount++;
-        //cout << "Connections Count : " << connCount << endl;
     }
 
 
@@ -80,27 +78,18 @@ class dbServer
                        const string& message,
                        Timestamp)
     {
-    	//增加发送现有电影名及图片和文本
-    	string header = message.substr(0, 3);
-    	string mes;
-    	if (header == "GSC")
-    	{
-    		mes = message.substr(4);
-        	vector<string> v = split(',', mes);
-        	//TODO 判断合法
-        	int res = cache_.getSeatCache(conn, v[0], v[1], atoi(v[2].c_str()), atoi(v[3].c_str()));
-       	}
-       	if (header == "GST")
-       	{
-       		mes = message.substr(4);
-        	int res = cache_.getScheCache(conn, mes);
-       	}
-       	if (header == "GHC")
-       	{
-       		mes = message.substr(4);
-       		vector<string> v = split(',', mes);
-       		int res = cache_.getHallchoiceCache(conn, v[0], v[1]);
-       	}
+    	vector<string> v = split(',', message);
+        int res = cache_.getHallchoiceCache(conn, v[0], v[1]);
+        if (res == 1)
+            printf("getCache() return 1\n");
+        else if (res == 2)
+            printf("getCache() return 2\n");
+        else if (res == 3)
+            printf("getCache() return 3\n");
+        else if (res == 0)
+            printf("getCache() return 0\n");
+        else 
+            printf("getCache() return error\n");
     }
 
  
@@ -109,7 +98,6 @@ class dbServer
   LengthHeaderCodec codec_;
   dbCache cache_;
   int numThreads_;
-  //int connCount = 0;
 };
 
 int main(int argc, char* argv[])

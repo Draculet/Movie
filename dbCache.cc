@@ -32,18 +32,17 @@ int dbCache::getSeatCache(const TcpConnectionPtr& conn, string hallid, string ti
 {
 	int hallrow = 0;
     int hallcol = 0;
-    getHallInfo(conn, hallid, hallrow, hallcol);
+    //error!!!
+    getHallInfo(conn, hallid, hallrow, hallcol);//必须同步执行
     pair<string, string> p(hallid, time);
         //mutexGuard
     {
-        MutexLockGuard lock(mutex_[0]);
+        MutexLockGuard lock(seatmutex_);
         auto iter = seatCache_.begin();
         iter = seatCache_.find(p);
         if (iter == seatCache_.end())
         {
-            //mutex
             seatCache_[p].push_back(0);
-            //endmutex
             cout << "读缓存getSeatCache()" << endl;
             //TODO 读取缓存,查询状态,回调?或者使用runAfter()
              threadPoolptr_->run(bind(&dbCache::loadSeatCacheAndSend, this, conn, hallid, time, hallrow, hallcol, row, col));
@@ -73,7 +72,7 @@ int dbCache::getSeatCache(const TcpConnectionPtr& conn, string hallid, string ti
                 {
                     seatCache_[p][hallcol * (row - 1) + col] = '1';
                     cout << "购票成功getSeatCache()" << endl;
-                    string responce = "succ";
+                    string responce = "succ " + hallid + " " + time + " " + to_string(row) + " " + to_string(col) + "getSeatCache()" + to_string(hallrow) + to_string(hallcol);
                     conn->send(responce);
                     return 3;
                 }
@@ -132,7 +131,7 @@ int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, stri
             {
                 resrow = mysql_num_rows(res_ptr);
               	{
-                	MutexLockGuard lock(mutex_[0]);
+                	MutexLockGuard lock(seatmutex_);
                 	
                 	for (int i = 0; i < resrow; i++)
                 	{
@@ -157,7 +156,7 @@ int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, stri
             //    cout << ch << " ";
             //}
     	{
-        	MutexLockGuard lock(mutex_[0]);
+        	MutexLockGuard lock(seatmutex_);
         	
         	if (seatCache_[p][0] == 'k')
             {
@@ -175,7 +174,7 @@ int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, stri
                 //{
                 //    cout << ch << " ";
                 //}
-                	string responce = "succ";
+                	string responce = "succ " + hallid + " " + time + " " + to_string(row) + " " + to_string(col) + "loadSeatCacheAndSend()" + to_string(hallrow) + to_string(hallcol);
                 	tcpconn->send(responce);
              	}
             }
@@ -183,9 +182,9 @@ int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, stri
             {
             	//something else
             }
-        }
-        mysql_close(conn);
-        mysql_free_result(res_ptr);
+      }
+      mysql_close(conn);
+      mysql_free_result(res_ptr);
 }
 
 
@@ -197,45 +196,32 @@ int dbCache::getHallInfo(const TcpConnectionPtr& conn, string& hallid, int& hall
     	iter = hallCache_.find(hallid);
     	if (iter == hallCache_.end())
     	{
-       		 //mutex
-         	hallCache_[hallid] = pair<int, int>(-1,-1);
-         	//endmutex
          	cout << "读缓存getHallInfo()" << endl;
         	//TODO 读取缓存,查询状态,回调?或者使用runAfter()
-        	threadPoolptr_->run(bind(&dbCache::loadHallCache, this, hallid, hallrow, hallcol));
+        	loadHallCacheWithLock(hallid, hallrow, hallcol);//同步执行
         	//runAfter(1, bind(&dbCache::getCache, this, hallid, time, row, col));
-        	return 0;
+        	return 1;
 		}
 		else
         {
-            //数组第一个作为状态标记
-            if (hallCache_[hallid] == pair<int, int>(-1,-1))
+            if (hallCache_[hallid].first > 0 && hallCache_[hallid].second > 0)
             {
-                cout << "正在读取缓存getHallInfo()" << endl;
-                conn->getLoop()->runAfter(1, bind(&dbCache::getHallInfo, this, conn, hallid, hallrow, hallcol));
-                return 1;
+                hallrow = hallCache_[hallid].first;
+                hallcol = hallCache_[hallid].second;
+                cout << "直接读取缓存getHallInfo()" << endl;
+                return 2;
             }
             else
-            {   
-            	if (hallCache_[hallid].first > 0 && hallCache_[hallid].second > 0)
-            	{
-                	hallrow = hallCache_[hallid].first;
-                	hallcol = hallCache_[hallid].second;
-                	cout << "直接读取缓存getHallInfo()" << endl;
-                	return 2;
-                }
-                else
-                {
-                	cout << "读取数据错误getHallInfo()" << endl;
-                	return -1;
-                }
+            {
+               cout << "缓存数据错误getHallInfo()" << endl;
+                return -1;
             }
-         }
-      }
+        }
+    }
 }
 
 
-int dbCache::loadHallCache(std::string& hallid, int& hallrow, int& hallcol)//FIXME MUTEX
+int dbCache::loadHallCacheWithLock(std::string& hallid, int& hallrow, int& hallcol)//FIXME MUTEX
 {
 		int res;//执行sql语句后的返回标志
     	MYSQL_RES *res_ptr;//指向查询结果的指针
@@ -280,21 +266,20 @@ int dbCache::loadHallCache(std::string& hallid, int& hallrow, int& hallcol)//FIX
             	res_ptr = mysql_store_result(conn);
             	if (res_ptr)
             	{
-            		{
-        				MutexLockGuard lock(mutex_[1]);
-        			
-                		result_row = mysql_fetch_row(res_ptr);
-                		hallrow = atoi(result_row[0]);
-                		hallcol = atoi(result_row[1]);
-                		if (hallrow > 0 && hallcol > 0)
-                			hallCache_[hallid] = pair<int, int>(hallrow, hallcol);
-                		else
-                		{
-                			hallrow = -1;
-                			hallcol = -1;
-                			cout << "读取数据错误getHallInfo()" << endl;
-                			return -1;
-                		}
+                	result_row = mysql_fetch_row(res_ptr);
+                	hallrow = atoi(result_row[0]);
+                	hallcol = atoi(result_row[1]);
+                	if (hallrow > 0 && hallcol > 0)
+                	{
+                		hallCache_[hallid].first = hallrow;
+                		hallCache_[hallid].second = hallcol;
+                	}
+                	else
+                	{
+                		hallrow = -1;
+                		hallcol = -1;
+                		cout << "读取缓存数据时,缓存数据错误getHallInfo()" << endl;
+                		return -1;
                 	}
                 	cout << "缓存读取完成loadHallCache()" << endl;
             	}
@@ -320,7 +305,7 @@ int dbCache::getScheCache(const muduo::net::TcpConnectionPtr& conn, std::string 
     	if (iter == scheCache_.end())
     	{
        		 //mutex
-         	scheCache_[movie].push_back(0);
+         	scheCache_[movie].push_back("0");
          	//endmutex
          	cout << "读缓存getScheCache()" << endl;
         	//TODO 读取缓存,查询状态,回调?或者使用runAfter()
@@ -331,7 +316,7 @@ int dbCache::getScheCache(const muduo::net::TcpConnectionPtr& conn, std::string 
 		else
         {
             //数组第一个作为状态标记
-            if (scheCache_[movie][0] == string(0))
+            if (scheCache_[movie][0] == string("0"))
             {
                 cout << "正在读取缓存getScheCache()" << endl;
                 conn->getLoop()->runAfter(1, bind(&dbCache::getScheCache, this, conn, movie));
@@ -340,13 +325,16 @@ int dbCache::getScheCache(const muduo::net::TcpConnectionPtr& conn, std::string 
             else if (scheCache_[movie][0] == "k")
             {
             	string tmp;
-            	for (int i = 1; i < scheCache_[movie].size(); i++)
+            	int i;
+            	for (i = 1; i < scheCache_[movie].size() - 1; i++)
             	{
             		tmp += scheCache_[movie][i];
-            		tmp += " ";
+            		tmp += ",";
             	}
+            	tmp += scheCache_[movie][i];
             	conn->send(tmp);
-            	cout << "读取排片时间成功" << endl;
+            	cout << "读取排片时间成功getScheCache()" << endl;
+            	return 2;
             }
             else
             {
@@ -390,7 +378,7 @@ int dbCache::loadScheCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::st
         }
         mysql_query(conn,"set names UTF8");
         //FIXME
-        string sql = "select distinct S_TIME from Table_Schedule where M_ID in(select M_ID from Table_Movie where M_Name='" + movie + "')";
+        string sql = "select distinct S_TIME from Table_Schedule where M_ID in(select M_ID from Table_Movie where M_Name='" + movie + "') order by S_TIME";
         res = mysql_query(conn, sql.c_str());
   }
         if(res)
@@ -436,11 +424,13 @@ int dbCache::loadScheCacheAndSend(muduo::net::TcpConnectionPtr& tcpconn, std::st
             {
             	//FIXME 此处可能需要使用codec_.send()
             	string tmp;
-            	for (int i = 1; i < scheCache_[movie].size(); i++)
+            	int i;
+            	for (i = 1; i < scheCache_[movie].size() - 1; i++)
             	{
             		tmp += scheCache_[movie][i];
-            		tmp += " ";
+            		tmp += ",";
             	}
+            	tmp += scheCache_[movie][i];
             	tcpconn->send(tmp);
             	cout << "读取排片时间成功loadScheCacheAndSend()" << endl;
             }
@@ -466,7 +456,7 @@ int dbCache::getHallchoiceCache(const muduo::net::TcpConnectionPtr& conn, std::s
         if (iter == hallchoiceCache_.end())
         {
             //mutex
-            hallchoiceCache_[p].push_back(0);
+            hallchoiceCache_[p].push_back("0");
             //endmutex
             cout << "读缓存getHallchoiceCache()" << endl;
             //TODO 读取缓存,查询状态,回调?或者使用runAfter()
@@ -477,7 +467,7 @@ int dbCache::getHallchoiceCache(const muduo::net::TcpConnectionPtr& conn, std::s
         else
         {
             //数组第一个作为状态标记
-            if (hallchoiceCache_[p][0] == string(0))
+            if (hallchoiceCache_[p][0] == string("0"))
             {
                 cout << "正在读取缓存getHallchoiceCache()" << endl;
                 conn->getLoop()->runAfter(1, bind(&dbCache::getHallchoiceCache, this, conn, movie, time));
@@ -493,6 +483,7 @@ int dbCache::getHallchoiceCache(const muduo::net::TcpConnectionPtr& conn, std::s
             	}
             	conn->send(tmp);
             	cout << "读取指定时间内可选厅成功getHallchoiceCache()" << endl;
+            	return 2;
             }
             else
             {
