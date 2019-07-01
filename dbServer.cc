@@ -8,8 +8,9 @@
 
 #include "codec.h"
 #include "dbCache.h"
-#include<stdlib.h>
-#include<mysql/mysql.h>
+#include "dbop.h"
+#include <stdlib.h>
+#include <mysql/mysql.h>
 #include <utility>
 #include <map>
 #include <vector>
@@ -83,12 +84,16 @@ class dbServer
     	//增加发送现有电影名及图片和文本
     	string header = message.substr(0, 3);
     	string mes;
+    	if (header == "GMI")
+    	{
+    		int res = cache_.getMovieCache(conn, &codec_);
+    	}
     	if (header == "GSC")
     	{
     		mes = message.substr(4);
         	vector<string> v = split(',', mes);
         	//TODO 判断合法
-        	int res = cache_.getSeatCache(conn, v[0], v[1], atoi(v[2].c_str()), atoi(v[3].c_str()));
+        	int res = cache_.getSeatCache(conn, &codec_, v[0], v[1], atoi(v[2].c_str()), atoi(v[3].c_str()));
        	}
        	if (header == "GST")
        	{
@@ -100,6 +105,27 @@ class dbServer
        		mes = message.substr(4);
        		vector<string> v = split(',', mes);
        		int res = cache_.getHallchoiceCache(conn, v[0], v[1]);
+       	}
+       	if (header == "ADD")
+       	{
+       		string mes = message.substr(4);
+       	    vector<string> v = split(',', mes);
+       	    Schedule s(v[0], atoi(v[1].c_str()), atoi(v[2].c_str()), v[3]);
+       		vector<Schedule> vs;
+       		vs.push_back(s);
+       		DBoper op;
+       		{
+       			MutexLockGuard lock(*(cache_.getsqllock()));
+       			op.insertMovie(v[0], vs);
+       			cache_.movieCacheClear();
+       		}
+       		
+       		//写入数据库后把电影内存数据清空.
+       		//其他内存缓存会自动读取
+       	}
+       	if (header == "ADDSCHE")
+       	{
+       		
        	}
     }
 

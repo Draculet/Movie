@@ -5,6 +5,7 @@
 #include <iostream>
 #include <string.h>
 #include <vector>
+#include "dbop.h"
 
 using namespace std;
 
@@ -16,7 +17,7 @@ string itos(int num)
     sprintf(tmp, "%d", num);
     return string(tmp);
 }
-class Schedule
+/*class Schedule
 {
     public:
     explicit Schedule(string name, int h_id, int price, string time):_name(name), hall_id(h_id), _price(price), _time(time)
@@ -32,12 +33,12 @@ class Schedule
     int hall_id;
     int _price;
     string _time;
-};
+};*/
 
-class DBoper
-{
-    public:
-    static int insertMovie(string m_name, vector<Schedule> schedules)
+//class DBoper
+//{
+//    public:
+    int DBoper::insertMovie(string m_name, vector<Schedule> schedules)
     {
         string toMovieHead = "INSERT INTO Table_Movie VALUE(";
         string toMovieTail = ",\'" + m_name + "\')";
@@ -58,7 +59,7 @@ class DBoper
             cout << "mysql_init failed!" << endl;
             return -1;
         }
-        conn = mysql_real_connect(conn,"127.0.0.1","root","13640358","Movie", 0 ,NULL,0);
+        conn = mysql_real_connect(conn,"127.0.0.1","root","335369376","Movie", 0 ,NULL,0);
         if (conn) 
         {
             cout << "Connection success!" << endl;
@@ -204,8 +205,8 @@ class DBoper
         }
         mysql_close(conn);
     }
-    
-    static int insertSeat(MYSQL *conn, int hallid, int sid)
+    //private:
+    int DBoper::insertSeat(MYSQL *conn, int hallid, int sid)
     {
         int res;//执行sql语句后的返回标志
         MYSQL_RES *res_ptr;//指向查询结果的指针
@@ -305,13 +306,13 @@ class DBoper
         }
     }
     
-    int insertHall(int id, string loc, int seatnum, int seatrow, int seatcol)
+    /*int insertHall(int id, string loc, int seatnum, int seatrow, int seatcol)
     {
         
     }
-};
+};*/
 
-int main(void)
+/*int main(void)
 {
     Schedule s1("A gay life style", 1, 35, "2019-4-18 17:00");
     Schedule s2("A gay life style", 1, 35, "2019-4-18 10:00");
@@ -351,4 +352,4 @@ int main(void)
     DBoper::insertMovie("A gay life style", v3);
     DBoper::insertMovie("Dead Pool", v4);
     DBoper::insertMovie("Dead Pool", v5);
-}
+}*/

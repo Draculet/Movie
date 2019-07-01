@@ -15,6 +15,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <iostream>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include "codec.h"
 
 using namespace muduo;
 using namespace muduo::net;
@@ -23,12 +26,247 @@ using namespace std;
 //TODO load系列函数未上锁
 //TODO 数据库查询可使用另一个锁
 dbCache::dbCache(ThreadPool *threadPool):
-        threadPoolptr_(threadPool)
+        threadPoolptr_(threadPool),
+        moviePtr_(new vector<pair<string, string> >())
 {
+	
 }
     
+
+int dbCache::getMovieCache(const muduo::net::TcpConnectionPtr& conn, LengthHeaderCodec* codecptr)
+{
+	shared_ptr<vector<pair<string, string> > > localptr;
+	{
+		MutexLockGuard lock(mutex_[4]);
+		if ((*moviePtr_).size() == 0 || (*moviePtr_)[0] == pair<string, string>("m", "m"))
+		{
+			if ((*moviePtr_).size() == 0)
+			{
+				(*moviePtr_).push_back(pair<string, string>("0", "0"));
+				threadPoolptr_->run(bind(&dbCache::loadMovieCacheAndSend, this, conn, codecptr));
+				return 0;
+			}
+			else if ((*moviePtr_)[0] == pair<string, string>("m", "m"))
+			{
+				(*moviePtr_)[0] = pair<string, string>("0", "0");
+				//FIXME 需要先将vector掏空再push_back
+				threadPoolptr_->run(bind(&dbCache::loadMovieCacheAndSend, this, conn, codecptr));
+				return 0;
+			}
+		}
+		else if ((*moviePtr_)[0] == pair<string, string>("0", "0"))
+		{
+			cout << "正在读取缓存getMovieCache()" << endl;
+            conn->getLoop()->runAfter(1, bind(&dbCache::getMovieCache, this, conn, codecptr));
+            return 1;
+		}
+        else if ((*moviePtr_)[0] == pair<string, string>("k", "k"))
+        {
+            localptr = moviePtr_;
+          	//FIXME 此处可能需要使用codec_.send()
+            //TODO 发送同id图片和文本
+        }
+    }
+        	for (int i = 1; i < localptr->size(); i++)
+        	{
+          		string msg = (*localptr)[i].first + "-" + (*localptr)[i].second;
+    			codecptr->send(conn, msg);
+    			struct stat buf;
+    			string picpath = (*localptr)[i].first + ".jpg";
+    			stat(picpath.c_str(), &buf);
+    			char rbuf[buf.st_size];
+    			char *ptr = rbuf;
+    			int fd = open(picpath.c_str(), O_RDONLY);
+    			int remain = buf.st_size;
+    			int n = read(fd, ptr, buf.st_size);
+    			remain -= n;
+    			while (remain > 0)
+    			{
+    				n = read(fd, ptr + n, remain);
+    				remain -= n;
+    			}
+    			msg = string(rbuf, buf.st_size);
+    			codecptr->send(conn, msg);
+    			close(fd);
+    
+    			string txtpath = (*localptr)[i].first + ".txt";
+   				stat(txtpath.c_str(), &buf);
+    			char rbuf2[buf.st_size];
+    			ptr = rbuf2;
+    			fd = open(txtpath.c_str(), O_RDONLY);
+    			remain = buf.st_size;
+    			n = read(fd, ptr, buf.st_size);
+    			remain -= n;
+    			while (remain > 0)
+    			{
+    				n = read(fd, ptr + n, remain);
+    				remain -= n;
+    			}
+    			msg = string(rbuf2, buf.st_size);
+    			codecptr->send(conn, msg);
+    			close(fd);
+          	}
+            string msg = "E";
+            codecptr->send(conn, msg);
+          	cout << "发送电影信息成功getMovieCache()" << endl;
+          	return 2;
+}
+
+int dbCache::loadMovieCacheAndSend(const muduo::net::TcpConnectionPtr& tcpconn, LengthHeaderCodec* codecptr)
+{
+	int res;//执行sql语句后的返回标志
+   	MYSQL_RES *res_ptr;//指向查询结果的指针
+    MYSQL_FIELD *field;//字段结构指针
+    MYSQL_ROW result_row;//按行返回查询信息
+    int resrow,rescolumn,length;//查询返回的行数和列数
+    MYSQL *conn;//一个数据库链接指针
+    
+ {
+    MutexLockGuard lock(sqlmutex_);
+        
+        
+    conn = mysql_init(NULL);
+
+    if(conn == NULL) 
+    { //如果返回NULL说明初始化失败
+         cout << "mysql_init failed!" << endl;
+         return -1;
+    }
+        conn = mysql_real_connect(conn,"127.0.0.1","root","335369376","Movie", 0 ,NULL,0);
+        if (conn)
+        {
+            cout << "Connection success!" << endl;
+        }
+        else 
+        {
+            cout << "Connection failed!" << endl;
+            cout << mysql_error(conn) << endl;
+            return -1;
+        }
+        mysql_query(conn,"set names UTF8");
+        //FIXME
+        string sql = "select M_ID, M_Name from Table_Movie";
+        res = mysql_query(conn, sql.c_str());
+  }
+        if(res)
+        {
+            cout << mysql_error(conn) << endl;
+            mysql_close(conn);
+            return -1;
+        }
+        else
+        {
+            res_ptr = mysql_store_result(conn);
+            if (res_ptr)
+            {
+                resrow = mysql_num_rows(res_ptr);
+              	{
+                	MutexLockGuard lock(mutex_[4]);
+                	if (!moviePtr_.unique())
+                	{
+                		moviePtr_.reset(new vector<pair<string, string> >(*moviePtr_));
+                	}
+                	for (int i = 0; i < resrow; i++)
+                	{
+                    	result_row = mysql_fetch_row(res_ptr);
+                    //cout << result_row[0] << " ";
+                    	moviePtr_->push_back(pair<string, string>(string(result_row[0]), string(result_row[1])));
+                	}
+                	(*moviePtr_)[0] = pair<string, string>("k", "k");
+               }
+            }
+            else
+            {
+            	//FIXME 细化此处报错
+                cout << "Failed to Get Detail" << endl;
+                mysql_close(conn);
+                mysql_free_result(res_ptr);
+                return -1;
+            }
+            cout << "缓存读取完毕loadMovieCacheAndSend()" << endl;
+            //for (auto &ch: cache[p])
+            //{
+            //    cout << ch << " ";
+            //}
+          	shared_ptr<vector<pair<string, string> > > localptr;
+          	{
+            	MutexLockGuard lock(mutex_[4]);
+            	if ((*moviePtr_)[0] == pair<string, string>("k", "k"))
+            	{
+            		localptr = moviePtr_;
+            	}
+          	}
+          	//FIXME 此处可能需要使用codec_.send()
+            //TODO 发送同id图片和文本
+          	for (int i = 1; i < localptr->size(); i++)
+          	{
+          		string msg = (*localptr)[i].first + "-" + (*localptr)[i].second;
+          		cout << "WAINING SEND " << msg << endl;
+    			codecptr->send(tcpconn, msg);
+    			struct stat buf;
+    			string picpath = (*localptr)[i].first + ".jpg";
+    			stat(picpath.c_str(), &buf);
+    			char rbuf[buf.st_size];
+    			char *ptr = rbuf;
+    			int fd = open(picpath.c_str(), O_RDONLY);
+    			int remain = buf.st_size;
+    			int n = read(fd, ptr, buf.st_size);
+    			remain -= n;
+    			while (remain > 0)
+    			{
+    				n = read(fd, ptr + n, remain);
+    				remain -= n;
+    			}
+    			msg = string(rbuf, buf.st_size);
+    			codecptr->send(tcpconn, msg);
+    			close(fd);
+    			
+
+    			string txtpath = (*localptr)[i].first + ".txt";
+   				stat(txtpath.c_str(), &buf);
+    			char rbuf2[buf.st_size];
+    			ptr = rbuf2;
+    			fd = open(txtpath.c_str(), O_RDONLY);
+    			remain = buf.st_size;
+    			n = read(fd, ptr, buf.st_size);
+    			remain -= n;
+    			while (remain > 0)
+    			{
+    				n = read(fd, ptr + n, remain);
+    				remain -= n;
+    			}
+    			msg = string(rbuf2, buf.st_size);
+    			cout << "WAINING SEND " << msg.size() << endl;
+    			codecptr->send(tcpconn, msg);
+    			close(fd);
+          	}
+          
+          	cout << "发送电影信息成功loadScheCacheAndSend()" << endl;
+          	string msg = "E";
+            codecptr->send(tcpconn, msg);
+            
+          	mysql_close(conn);
+        	mysql_free_result(res_ptr);
+          	return 0;
+        }
+            //FIXME 若考虑管理员修改则会有其他可能	
+         if ((*moviePtr_)[0] == pair<string, string>("m", "m"))
+         {
+            	
+         }
+         else
+         {
+            cout << "读取数据错误loadScheCacheAndSend()" << endl;
+            return -1;
+         }
+          //}
+        mysql_close(conn);
+        mysql_free_result(res_ptr);
+}
+
+
 //TODO 需要考虑下映后不存在座位的情况
-int dbCache::getSeatCache(const TcpConnectionPtr& conn, string hallid, string time, int row, int col)
+int dbCache::getSeatCache(const TcpConnectionPtr& conn, LengthHeaderCodec* codecptr, string hallid, string time, int row, int col)
 {
 	int hallrow = 0;
     int hallcol = 0;
@@ -45,7 +283,7 @@ int dbCache::getSeatCache(const TcpConnectionPtr& conn, string hallid, string ti
             seatCache_[p].push_back(0);
             cout << "读缓存getSeatCache()" << endl;
             //TODO 读取缓存,查询状态,回调?或者使用runAfter()
-             threadPoolptr_->run(bind(&dbCache::loadSeatCacheAndSend, this, conn, hallid, time, hallrow, hallcol, row, col));
+             threadPoolptr_->run(bind(&dbCache::loadSeatCacheAndSend, this, conn, codecptr, hallid, time, hallrow, hallcol, row, col));
             //runAfter(1, bind(&dbCache::getCache, this, hallid, time, row, col));
             return 0;
         }
@@ -55,33 +293,56 @@ int dbCache::getSeatCache(const TcpConnectionPtr& conn, string hallid, string ti
             if (seatCache_[p][0] == 0)
             {
                 cout << "正在读取缓存getSeatCache()" << endl;
-                conn->getLoop()->runAfter(1, bind(&dbCache::getSeatCache, this, conn, hallid, time, row, col));
+                conn->getLoop()->runAfter(1, bind(&dbCache::getSeatCache, this, conn, codecptr, hallid, time, row, col));
                 return 1;
             }
             //TODO 判断seatCache_[p][0]=='k'
             else
             {   
-                if (seatCache_[p][hallcol * (row - 1) + col] == '1')
+            	if (row == 0 && col == 0)
+            	{
+            		string responce;
+            		//先发一行让对端知道列数
+            		for (int i = 0; i < hallcol; i++)
+            			responce += seatCache_[p][i];
+            		codecptr->send(conn, responce);
+            		//为方便，将所有座位信息发送
+            		responce = "";
+            		for (auto ch: seatCache_[p])
+            			responce += ch;
+            		codecptr->send(conn, responce);
+            		
+            		return 2;
+            	}
+                else if (seatCache_[p][hallcol * (row - 1) + col] == '1')
                 {
                     cout << "票已售getSeatCache()" << endl;
                     string responce = "fail";
+                    //TODO 优化:将发送移出临界区(send如果在本线程调用则会同步执行,延长缓冲区)
                     conn->send(responce);
-                    return 2;
+                    return 3;
                 }
-                else
+                else if (seatCache_[p][hallcol * (row - 1) + col] == '0')
                 {
                     seatCache_[p][hallcol * (row - 1) + col] = '1';
                     cout << "购票成功getSeatCache()" << endl;
                     string responce = "succ " + hallid + " " + time + " " + to_string(row) + " " + to_string(col) + "getSeatCache()" + to_string(hallrow) + to_string(hallcol);
+                    //TODO 优化:将发送移出临界区(send如果在本线程调用则会同步执行,延长缓冲区)
                     conn->send(responce);
-                    return 3;
+                    return 4;
+                }
+                else
+                {
+                	string responce = "error ";
+                	conn->send(responce);
+                	return 5;
                 }
             }
         }
     }
 }
 
-int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, string time, int hallrow, int hallcol, int row, int col)
+int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, LengthHeaderCodec* codecptr, string hallid, string time, int hallrow, int hallcol, int row, int col)
 {
     int res;//执行sql语句后的返回标志
    	MYSQL_RES *res_ptr;//指向查询结果的指针
@@ -160,13 +421,26 @@ int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, stri
         	
         	if (seatCache_[p][0] == 'k')
             {
+            	if (row == 0 && col == 0)
+            	{
+            		string responce;
+            		//先发一行让对端知道列数
+            		for (int i = 0; i < hallcol; i++)
+            			responce += seatCache_[p][i];
+            		codecptr->send(tcpconn, responce);
+            		//为方便，将所有座位信息发送
+            		responce = "";
+            		for (auto ch: seatCache_[p])
+            			responce += ch;
+            		codecptr->send(tcpconn, responce);
+            	}
             	if (seatCache_[p][hallcol * (row - 1) + col] == '1')
             	{
                 	cout << "票已售loadSeatCacheAndSend()" << endl;
                 	string responce = "fail";
                 	tcpconn->send(responce);
             	}
-            	else
+            	else if (seatCache_[p][hallcol * (row - 1) + col] == '0')
            		{
                 	seatCache_[p][hallcol * (row - 1) + col] = '1';
                 	cout << "购票成功loadSeatCacheAndSend()" << endl;
@@ -175,6 +449,11 @@ int dbCache::loadSeatCacheAndSend(TcpConnectionPtr& tcpconn, string hallid, stri
                 //    cout << ch << " ";
                 //}
                 	string responce = "succ " + hallid + " " + time + " " + to_string(row) + " " + to_string(col) + "loadSeatCacheAndSend()" + to_string(hallrow) + to_string(hallcol);
+                	tcpconn->send(responce);
+             	}
+             	else
+             	{
+             		string responce = "error ";
                 	tcpconn->send(responce);
              	}
             }
